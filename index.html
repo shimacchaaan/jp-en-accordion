@@ -3,185 +3,182 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>意味トリガー式アコーディオン（JP→EN）</title>
+  <title>意味トリガー式アコーディオン（JP→EN）— Standalone HTML</title>
+  <!--
+    ✅ この版は “1ファイルHTML” でそのまま動きます。
+    - React/ReactDOM/Babel を CDN（unpkg）から読み込み
+    - JSX を <script type="text/babel"> で実行（ビルド不要）
+    - 外部UIライブラリ依存なし（invoke 不要）
+    - GitHub Pages に置いて URL 埋め込みで表示可能
+  -->
   <style>
     :root{--bg:#0f172a;--card:#111827;--ink:#e5e7eb;--muted:#9ca3af;--accent:#22d3ee;--ring:#334155}
     *{box-sizing:border-box}
     body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.6 system-ui,-apple-system,Segoe UI,Roboto,"Noto Sans JP",sans-serif;padding:16px}
-    header{margin-bottom:14px} h1{font-size:1.25rem;margin:0 0 6px}
-    .lead{margin:0;color:var(--muted);font-size:.95rem}
-    .wrap{max-width:760px;margin:0 auto;display:grid;gap:12px}
-    .controls{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0 2px}
+    .wrap{max-width:860px;margin:0 auto;display:grid;gap:12px}
+    .card{background:var(--card);border:1px solid var(--ring);border-radius:12px;padding:12px}
+    .lead{color:var(--muted);font-size:.95rem}
+    .controls{display:flex;gap:8px;flex-wrap:wrap}
     button{appearance:none;border:1px solid var(--ring);color:var(--ink);background:transparent;padding:8px 10px;border-radius:10px;font-weight:600;cursor:pointer}
     button:active{transform:translateY(1px)}
-    details{background:var(--card);border:1px solid var(--ring);border-radius:12px;padding:6px 10px}
-    summary{cursor:pointer;outline:none;list-style:none;display:flex;align-items:center;gap:8px;font-weight:700}
-    summary::-webkit-details-marker{display:none}
-    .tag{color:var(--accent);font-size:.8rem;font-weight:700}
-    .en{margin:8px 2px 6px 26px;padding:10px 12px;border-left:3px solid var(--accent);background:rgba(255,255,255,.03);border-radius:8px}
-    .hint{margin:4px 0 10px 26px;color:var(--muted);font-size:.85rem}
-    .small{font-size:.85rem;color:var(--muted)}
-    .card{background:var(--card);border:1px solid var(--ring);border-radius:12px;padding:10px}
     .bar{height:8px;background:#1f2937;border-radius:8px;overflow:hidden}
     .fill{height:100%;background:var(--accent);width:0%}
+    .list{display:grid;gap:10px;margin-top:10px}
+    .item{border:1px solid #1f2937;border-radius:12px;padding:8px}
+    .sum{display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:700}
+    .tag{font-size:11px;font-weight:800;color:#22d3ee;background:#082f36;border:1px solid #0e4a53;padding:2px 6px;border-radius:999px}
+    .panel{margin-left:10px;padding-left:10px;border-left:3px solid var(--accent);margin-top:6px}
+    .hint{color:var(--muted);font-size:.85rem;margin-top:4px}
+    .tests{display:grid;gap:6px;margin-top:10px}
+    .ok{background:#0b3a2b;border:1px solid #1e7f5b}
+    .ng{background:#3a0b0b;border:1px solid #7f1d1d}
+    .testrow{padding:6px 8px;border-radius:8px}
   </style>
+  <!-- React / ReactDOM UMD + Babel （ビルド不要で JSX 実行）-->
+  <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 </head>
 <body>
-  <header class="wrap">
-    <h1>意味トリガー式アコーディオン（JP→EN）</h1>
-    <p class="lead">※日本語は直訳しない“ラベル”。<span class="small">英語は自然な言い方だけを表示</span></p>
-    <div class="controls">
-      <button id="openAll">全部ひらく</button>
-      <button id="closeAll">全部とじる</button>
-      <button id="shuffle">順番シャッフル</button>
-    </div>
-  </header>
+  <div id="root"></div>
 
-  <main class="wrap" id="list"></main>
+  <script type="text/babel">
+    const { useMemo, useState, useEffect } = React;
 
-  <section class="wrap">
-    <div class="card">
-      <div style="display:flex;gap:10px;align-items:center">
-        <div style="flex:1">
-          <div class="bar"><div id="fill" class="fill"></div></div>
-          <div id="meter" class="small" style="margin-top:6px">開いた項目：0/0（0%）</div>
-        </div>
-        <button id="rerun">内蔵テスト実行</button>
-      </div>
-      <div id="tests" style="display:grid;gap:6px;margin-top:10px"></div>
-    </div>
-  </section>
-
-  <script>
-    // 教材データ（直訳しない：JPはラベル、ENは自然表現）
-    const ITEMS = [
-      { id:"intro-01", tag:"自己紹介", jp:"こんにちは、私は〜です", en:"Hi, I’m [Your Name].", hint:"直訳NG。名乗りは最短でOK。" },
-      { id:"hobby-01", tag:"趣味", jp:"音楽が好き／作曲が好き", en:"I like making music. / I love composing.", hint:"make music＝音楽活動全般。like/loveで自然に。" },
-      { id:"progress-01", tag:"近況", jp:"ここ数ヶ月で12曲つくった", en:"I wrote 12 songs in the past few months.", hint:"in the past few months＝直近の数ヶ月。" },
-      { id:"feeling-01", tag:"気持ち", jp:"作れたのは嬉しい／もっと作りたい", en:"I’m happy about it, but I want to make more.", hint:"be happy about it で十分自然。" },
-      { id:"reunion-01", tag:"再会", jp:"また話せて嬉しい", en:"I’m really glad we can talk again." },
-      { id:"nervous-01", tag:"状況", jp:"久しぶりで少し緊張している", en:"I’m a bit nervous because it’s been a while." },
-      { id:"reason-01", tag:"理由", jp:"自分のプロジェクトに時間が必要だった", en:"I stopped our weekly calls because I needed time for my own projects.", hint:"because I needed time で十分通じる。" },
-      { id:"future-01", tag:"今後", jp:"音楽も英語も少しずつ続けたい", en:"I want to keep making music and keep practicing English little by little." },
-      { id:"quote-01", tag:"名台詞", jp:"（おまけ）マトリックスの一言", en:"I know kung fu.", hint:"発音リズム：I / know / KUNG fu." }
+    const INITIAL_ITEMS = [
+      { id: "intro-01",   tag: "自己紹介", jp: "こんにちは、私は〜です",           en: "Hi, I’m [Your Name].",                                                   hint: "直訳NG。名乗りは最短でOK。" },
+      { id: "hobby-01",   tag: "趣味",     jp: "音楽が好き／作曲が好き",         en: "I like making music. / I love composing.",                               hint: "make music＝音楽活動全般。like/loveで自然に。" },
+      { id: "progress-01",tag: "近況",     jp: "ここ数ヶ月で12曲つくった",       en: "I wrote 12 songs in the past few months.",                               hint: "in the past few months＝直近の数ヶ月。" },
+      { id: "feeling-01", tag: "気持ち",   jp: "作れたのは嬉しい／もっと作りたい", en: "I’m happy about it, but I want to make more.",                           hint: "be happy about it で十分自然。" },
+      { id: "reunion-01", tag: "再会",     jp: "また話せて嬉しい",                 en: "I’m really glad we can talk again.",                                   hint: "glad we can talk again＝再開の喜び。" },
+      { id: "nervous-01", tag: "状況",     jp: "久しぶりで少し緊張している",       en: "I’m a bit nervous because it’s been a while.",                          hint: "I’m a bit + adj でやわらかく。" },
+      { id: "reason-01",  tag: "理由",     jp: "自分のプロジェクトに時間が必要だった", en: "I stopped our weekly calls because I needed time for my own projects.", hint: "because I needed time で十分通じる。" },
+      { id: "future-01",  tag: "今後",     jp: "音楽も英語も少しずつ続けたい",     en: "I want to keep making music and keep practicing English little by little.", hint: "keep ~ing / little by little は相性◎。" },
+      { id: "quote-01",   tag: "名台詞",   jp: "（おまけ）マトリックスの一言",     en: "I know kung fu.",                                                     hint: "発音リズム：I / know / KUNG fu." },
     ];
 
-    const list = document.getElementById('list');
-    const fill = document.getElementById('fill');
-    const meter = document.getElementById('meter');
-
-    let state = { open: new Set(), items: [...ITEMS] };
-
-    function render() {
-      list.innerHTML = '';
-      state.items.forEach(it => {
-        const details = document.createElement('details');
-        details.dataset.id = it.id;
-        if (state.open.has(it.id)) details.open = true;
-
-        const summary = document.createElement('summary');
-        const tag = document.createElement('span');
-        tag.className = 'tag';
-        tag.textContent = it.tag;
-
-        const jp = document.createElement('span');
-        jp.style.fontWeight = '700';
-        jp.textContent = it.jp;
-
-        summary.appendChild(tag);
-        summary.appendChild(document.createTextNode(' '));
-        summary.appendChild(jp);
-
-        const en = document.createElement('div');
-        en.className = 'en';
-        en.textContent = it.en;
-
-        details.appendChild(summary);
-        details.appendChild(en);
-
-        if (it.hint) {
-          const hint = document.createElement('div');
-          hint.className = 'hint';
-          hint.textContent = it.hint;
-          details.appendChild(hint);
-        }
-
-        details.addEventListener('toggle', () => {
-          if (details.open) state.open.add(it.id); else state.open.delete(it.id);
-          updateProgress();
-        });
-
-        list.appendChild(details);
-      });
-
-      updateProgress();
-    }
-
-    function updateProgress() {
-      const total = state.items.length;
-      const opened = state.open.size;
-      const pct = total ? Math.round((opened / total) * 100) : 0;
-      fill.style.width = pct + '%';
-      meter.textContent = `開いた項目：${opened}/${total}（${pct}%）`;
-    }
-
-    function shuffle() {
-      const a = [...state.items];
+    // --- utils ---
+    const shuffleArray = (arr) => {
+      const a = [...arr];
       for (let i = a.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));
         [a[i], a[j]] = [a[j], a[i]];
       }
-      state.items = a;
-      render();
-    }
-
-    document.getElementById('openAll').onclick = () => {
-      state.open = new Set(state.items.map(i => i.id)); render();
+      return a;
     };
-    document.getElementById('closeAll').onclick = () => {
-      state.open = new Set(); render();
-    };
-    document.getElementById('shuffle').onclick = shuffle;
+    const percent = (opened, total) => (total ? Math.round((opened/total)*100) : 0);
+    const idsOf = (items) => items.map(i => i.id);
 
-    // 内蔵テスト（最小）：shuffle要素保持・percent境界など
+    // --- tests ---
     function runTests() {
-      const out = [];
-      const assert = (name, cond) => out.push({ name, pass: !!cond });
-
-      // shuffle: 要素は保たれる
-      const src = [1,2,3,4,5,6];
-      const sh = (()=>{ const b=[...src]; for(let i=b.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[b[i],b[j]]=[b[j],b[i]]} return b })();
-      assert('shuffle keeps elements', src.slice().sort().join(',') === sh.slice().sort().join(','));
-
-      // progress: 0/0 -> 0
-      const pct = (o,t)=> t? Math.round((o/t)*100) : 0;
-      assert('percent 0/0 = 0', pct(0,0) === 0);
-      assert('percent 3/10 = 30', pct(3,10) === 30);
-      assert('percent 10/10 = 100', pct(10,10) === 100);
-
-      return out;
+      const results = [];
+      const assert = (name, cond, info="") => results.push({ name, passed: !!cond, info });
+      {
+        const src = [1,2,3,4,5,6];
+        const s1 = shuffleArray(src);
+        const same = src.slice().sort().join(',') === s1.slice().sort().join(',');
+        assert('shuffle preserves elements', same);
+        const tries = [shuffleArray(src).join(','), shuffleArray(src).join(','), shuffleArray(src).join(',')];
+        const anyChanged = tries.some(j => j !== src.join(','));
+        assert('shuffle usually changes order (probabilistic)', anyChanged, tries.join(' | '));
+      }
+      {
+        assert('percent 0/0 -> 0', percent(0,0) === 0);
+        assert('percent 3/10 -> 30', percent(3,10) === 30);
+        assert('percent 10/10 -> 100', percent(10,10) === 100);
+      }
+      {
+        const ids = idsOf(INITIAL_ITEMS);
+        assert('idsOf length matches', ids.length === INITIAL_ITEMS.length);
+        assert('idsOf unique', new Set(ids).size === ids.length);
+      }
+      return results;
     }
 
-    function renderTests() {
-      const rows = runTests();
-      const box = document.getElementById('tests');
-      box.innerHTML = '';
-      rows.forEach(r => {
-        const d = document.createElement('div');
-        d.style.padding = '6px 8px';
-        d.style.borderRadius = '8px';
-        d.style.border = '1px solid';
-        if (r.pass) { d.style.background = '#0b3a2b'; d.style.borderColor = '#1e7f5b' }
-        else { d.style.background = '#3a0b0b'; d.style.borderColor = '#7f1d1d' }
-        d.textContent = `${r.pass ? '✅ PASS' : '❌ FAIL'} — ${r.name}`;
-        box.appendChild(d);
-      });
+    function App() {
+      const [items, setItems] = useState(INITIAL_ITEMS);
+      const [openIds, setOpenIds] = useState([]);
+      const [tests, setTests] = useState([]);
+
+      const total = items.length;
+      const opened = openIds.length;
+      const pct = useMemo(() => percent(opened, total), [opened, total]);
+
+      useEffect(() => { setTests(runTests()); }, []);
+
+      const toggle = (id) => setOpenIds(prev => prev.includes(id) ? prev.filter(x=>x!==id) : [...prev, id]);
+      const openAll = () => setOpenIds(idsOf(items));
+      const closeAll = () => setOpenIds([]);
+      const shuffleAll = () => setItems(prev => shuffleArray(prev));
+
+      return (
+        <div className="wrap">
+          <section className="card">
+            <h1 style={{margin:"0 0 4px"}}>意味トリガー式アコーディオン（JP→EN）</h1>
+            <p className="lead">日本語は直訳しない<strong style={{color:'#e5e7eb'}}>ラベル</strong>、英語は<strong style={{color:'#e5e7eb'}}>自然な言い方</strong>のみ。</p>
+            <div className="controls" style={{marginTop:8}}>
+              <button onClick={openAll}>全部ひらく</button>
+              <button onClick={closeAll}>全部とじる</button>
+              <button onClick={shuffleAll} style={{background:'#0e7490',borderColor:'#0e7490'}}>順番シャッフル</button>
+            </div>
+            <div style={{display:'flex',gap:10,alignItems:'center',marginTop:10}}>
+              <div style={{flex:1}}>
+                <div className="bar"><div className="fill" style={{width: pct+'%'}}></div></div>
+                <div className="lead" style={{fontSize:13, marginTop:6}}>開いた項目：{opened} / {total}（{pct}%）</div>
+              </div>
+            </div>
+            <div className="list">
+              {items.map(it => {
+                const isOpen = openIds.includes(it.id);
+                return (
+                  <div key={it.id} className="item">
+                    <div className="sum" onClick={()=>toggle(it.id)}>
+                      <span className="tag">{it.tag}</span>
+                      <span>{it.jp}</span>
+                      <span style={{marginLeft:'auto',opacity:.7}}>{isOpen ? '▲' : '▼'}</span>
+                    </div>
+                    {isOpen && (
+                      <div className="panel">
+                        <div>{it.en}</div>
+                        {it.hint && <div className="hint">{it.hint}</div>}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+
+          <section className="card">
+            <h2 style={{margin:"0 0 6px", fontSize:18}}>内蔵テスト（簡易）</h2>
+            <div className="lead" style={{fontSize:13}}>純関数（shuffle / percent / idsOf）の動作チェック。</div>
+            <div className="tests">
+              {tests.map((t,i)=> (
+                <div key={i} className={`testrow ${t.passed ? 'ok':'ng'}`}>
+                  <div style={{fontWeight:700}}>{t.passed ? '✅ PASS' : '❌ FAIL'} — {t.name}</div>
+                  {t.info ? <div style={{fontSize:12,opacity:.8,marginTop:2}}>{t.info}</div> : null}
+                </div>
+              ))}
+            </div>
+            <div style={{marginTop:10}}>
+              <button onClick={()=>setTests(runTests())}>テストをもう一度実行</button>
+            </div>
+          </section>
+
+          <section className="card">
+            <h2 style={{margin:"0 0 6px", fontSize:18}}>使い方メモ</h2>
+            <ul style={{margin:0,paddingLeft:18,lineHeight:1.7,color:'#cbd5e1'}}>
+              <li>日本語は「意味のトリガー」。直訳はしません。</li>
+              <li>英語は「自然な一言」。状況と感情で覚えるのがコツ。</li>
+              <li>GitHub Pages の <code>index.html</code> にこのファイルを置き、Googleサイトは「埋め込み→URL」で表示。</li>
+            </ul>
+          </section>
+        </div>
+      );
     }
 
-    document.getElementById('rerun').onclick = renderTests;
-
-    // 初期描画
-    render(); renderTests();
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App/>);
   </script>
 </body>
 </html>
