@@ -1,0 +1,221 @@
+import React, { useEffect, useMemo, useState } from "react";
+
+/**
+ * React版：意味トリガー式アコーディオン（JP→EN）
+ * --------------------------------------------------
+ * 修正点（ReferenceError: invoke is not defined 対応）
+ * - 外部UIライブラリ（shadcn/ui, lucide-react 等）への依存を全て削除。
+ * - 純粋な React + 生CSS/HTML のみで実装。
+ * - アコーディオンは自前のコンポーネントで管理（details/summary ではなく state 制御）。
+ * - 「開く/とじる/シャッフル」などの機能はそのまま維持。
+ * - 追加で軽量なテスト（ユニット相当）を内蔵し、UI上に結果を表示。
+ *
+ * ✅ これでサンドボックス環境でも "invoke" 未定義エラーの発火点を排除できます。
+ */
+
+// --- 学習カード（意味ラベルJP → 自然なEN） ---
+const INITIAL_ITEMS = [
+  { id: "intro-01",   tag: "自己紹介", jp: "こんにちは、私は〜です",           en: "Hi, I’m [Your Name].",                                                   hint: "直訳NG。名乗りは最短でOK。" },
+  { id: "hobby-01",   tag: "趣味",     jp: "音楽が好き／作曲が好き",         en: "I like making music. / I love composing.",                               hint: "make music＝音楽活動全般。like/loveで自然に。" },
+  { id: "progress-01",tag: "近況",     jp: "ここ数ヶ月で12曲つくった",       en: "I wrote 12 songs in the past few months.",                               hint: "in the past few months＝直近の数ヶ月。" },
+  { id: "feeling-01", tag: "気持ち",   jp: "作れたのは嬉しい／もっと作りたい", en: "I’m happy about it, but I want to make more.",                           hint: "be happy about it で十分自然。" },
+  { id: "reunion-01", tag: "再会",     jp: "また話せて嬉しい",                 en: "I’m really glad we can talk again.",                                   hint: "glad we can talk again＝再開の喜び。" },
+  { id: "nervous-01", tag: "状況",     jp: "久しぶりで少し緊張している",       en: "I’m a bit nervous because it’s been a while.",                          hint: "I’m a bit + adj でやわらかく。" },
+  { id: "reason-01",  tag: "理由",     jp: "自分のプロジェクトに時間が必要だった", en: "I stopped our weekly calls because I needed time for my own projects.", hint: "because I needed time で十分通じる。" },
+  { id: "future-01",  tag: "今後",     jp: "音楽も英語も少しずつ続けたい",     en: "I want to keep making music and keep practicing English little by little.", hint: "keep ~ing / little by little は相性◎。" },
+  { id: "quote-01",   tag: "名台詞",   jp: "（おまけ）マトリックスの一言",     en: "I know kung fu.",                                                     hint: "発音リズム：I / know / KUNG fu." },
+];
+
+// --- ユーティリティ（純関数） ---
+const shuffleArray = (arr) => {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+};
+
+const percent = (openedCount, total) => {
+  if (!total) return 0;
+  return Math.round((openedCount / total) * 100);
+};
+
+const idsOf = (items) => items.map((i) => i.id);
+
+// --- 軽量テスト基盤 ---
+function runTests() {
+  const results = [];
+  const assert = (name, cond, info = "") => {
+    results.push({ name, passed: !!cond, info });
+  };
+
+  // 1) shuffle は要素を保存しつつ順序を変える（ことが“多い”）
+  {
+    const src = [1, 2, 3, 4, 5, 6];
+    const s1 = shuffleArray(src);
+    const sameElements = src.slice().sort().join(",") === s1.slice().sort().join(",");
+    const orderChanged = src.join(",") !== s1.join(",");
+    assert("shuffle preserves elements", sameElements);
+    // 乱数なので順序が変わらないこともあるため、3回試して少なくとも1回は順序が変わることを確認
+    const tries = [shuffleArray(src).join(","), shuffleArray(src).join(","), shuffleArray(src).join(",")];
+    const anyChanged = tries.some((j) => j !== src.join(","));
+    assert("shuffle usually changes order (probabilistic)", anyChanged, tries.join(" | "));
+  }
+
+  // 2) percent の境界
+  {
+    assert("percent 0/0 -> 0", percent(0, 0) === 0);
+    assert("percent 0/10 -> 0", percent(0, 10) === 0);
+    assert("percent 3/10 -> 30", percent(3, 10) === 30);
+    assert("percent 10/10 -> 100", percent(10, 10) === 100);
+  }
+
+  // 3) idsOf の基本
+  {
+    const ids = idsOf(INITIAL_ITEMS);
+    assert("idsOf length matches", ids.length === INITIAL_ITEMS.length);
+    assert("idsOf unique", new Set(ids).size === ids.length);
+  }
+
+  return results;
+}
+
+// --- スタイル（生CSS） ---
+const styles = {
+  app: {
+    minHeight: "100vh",
+    background: "#0b1220", // 濃紺
+    color: "#e5e7eb",
+    fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, 'Noto Sans JP', sans-serif",
+    padding: "16px",
+  },
+  container: { maxWidth: 860, margin: "0 auto", display: "grid", gap: 12 },
+  card: {
+    background: "#0f172a",
+    border: "1px solid #1f2937",
+    borderRadius: 12,
+    padding: 12,
+  },
+  headerTitle: { display: "flex", alignItems: "center", gap: 8, fontSize: 18, fontWeight: 700, marginBottom: 6 },
+  subdued: { color: "#9ca3af", fontSize: 13 },
+  row: { display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" },
+  btn: {
+    appearance: "none",
+    border: "1px solid #334155",
+    background: "transparent",
+    color: "#e5e7eb",
+    borderRadius: 10,
+    padding: "8px 10px",
+    fontWeight: 700,
+    cursor: "pointer",
+  },
+  progressWrap: { display: "grid", gap: 6, flex: 1 },
+  progressBar: { height: 8, background: "#1f2937", borderRadius: 8, overflow: "hidden" },
+  progressFill: (p) => ({ height: "100%", width: `${p}%`, background: "#22d3ee" }),
+  list: { display: "grid", gap: 10 },
+  itemHeader: { display: "flex", alignItems: "center", gap: 8, cursor: "pointer" },
+  badge: { fontSize: 11, fontWeight: 800, color: "#22d3ee", background: "#082f36", border: "1px solid #0e4a53", padding: "2px 6px", borderRadius: 999 },
+  panel: { marginLeft: 10, paddingLeft: 10, borderLeft: "3px solid #22d3ee", marginTop: 6 },
+  hint: { color: "#9ca3af", fontSize: 13, marginTop: 4 },
+  testsWrap: { display: "grid", gap: 6 },
+  testRow: (ok) => ({ padding: "6px 8px", borderRadius: 8, background: ok ? "#0b3a2b" : "#3a0b0b", border: `1px solid ${ok ? "#1e7f5b" : "#7f1d1d"}` }),
+};
+
+export default function JPtoENAccordion() {
+  const [items, setItems] = useState(INITIAL_ITEMS);
+  const [openIds, setOpenIds] = useState([]); // 開いている項目ID
+  const [tests, setTests] = useState([]);
+
+  const total = items.length;
+  const opened = openIds.length;
+  const p = useMemo(() => percent(opened, total), [opened, total]);
+
+  useEffect(() => {
+    // マウント時にテスト実行
+    setTests(runTests());
+  }, []);
+
+  const toggle = (id) => {
+    setOpenIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  };
+
+  const openAll = () => setOpenIds(idsOf(items));
+  const closeAll = () => setOpenIds([]);
+  const shuffleAll = () => setItems((prev) => shuffleArray(prev));
+
+  return (
+    <div style={styles.app}>
+      <div style={styles.container}>
+        {/* メインカード */}
+        <div style={styles.card}>
+          <div style={styles.headerTitle}>意味トリガー式アコーディオン（JP→EN）</div>
+          <div style={styles.subdued}>日本語は <b style={{ color: "#e5e7eb" }}>意味ラベル</b>、英語は <b style={{ color: "#e5e7eb" }}>自然な言い方</b> のみを表示します。</div>
+
+          {/* 操作列 */}
+          <div style={{ ...styles.row, marginTop: 10 }}>
+            <div style={styles.progressWrap}>
+              <div style={styles.progressBar}>
+                <div style={styles.progressFill(p)} />
+              </div>
+              <div className="subdued" style={styles.subdued}>開いた項目：{opened} / {total}（{p}%）</div>
+            </div>
+
+            <button style={styles.btn} onClick={openAll}>全部ひらく</button>
+            <button style={styles.btn} onClick={closeAll}>全部とじる</button>
+            <button style={{ ...styles.btn, background: "#0e7490", borderColor: "#0e7490" }} onClick={shuffleAll}>順番シャッフル</button>
+          </div>
+
+          {/* アコーディオン本体 */}
+          <div style={{ ...styles.list, marginTop: 12 }}>
+            {items.map((it) => {
+              const isOpen = openIds.includes(it.id);
+              return (
+                <div key={it.id} style={{ border: "1px solid #1f2937", borderRadius: 12, padding: 8 }}>
+                  <div style={styles.itemHeader} onClick={() => toggle(it.id)}>
+                    <span style={styles.badge}>{it.tag}</span>
+                    <span style={{ fontWeight: 700 }}>{it.jp}</span>
+                    <span style={{ marginLeft: "auto", opacity: 0.7 }}>{isOpen ? "▲" : "▼"}</span>
+                  </div>
+                  {isOpen && (
+                    <div style={styles.panel}>
+                      <div style={{ lineHeight: 1.7 }}>{it.en}</div>
+                      {it.hint && <div style={styles.hint}>{it.hint}</div>}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* テスト結果カード */}
+        <div style={styles.card}>
+          <div style={{ ...styles.headerTitle, marginBottom: 8 }}>内蔵テスト（簡易）</div>
+          <div style={styles.subdued}>※ このUIの純関数（shuffle / percent / idsOf）を軽く検証します。</div>
+          <div style={{ ...styles.testsWrap, marginTop: 10 }}>
+            {tests.map((t, i) => (
+              <div key={i} style={styles.testRow(t.passed)}>
+                <div style={{ fontWeight: 700 }}>{t.passed ? "✅ PASS" : "❌ FAIL"} — {t.name}</div>
+                {t.info ? <div style={{ fontSize: 12, opacity: 0.8, marginTop: 2 }}>{t.info}</div> : null}
+              </div>
+            ))}
+          </div>
+          <div style={{ marginTop: 10 }}>
+            <button style={styles.btn} onClick={() => setTests(runTests())}>テストをもう一度実行</button>
+          </div>
+        </div>
+
+        {/* 使い方メモ */}
+        <div style={styles.card}>
+          <div style={styles.headerTitle}>使い方メモ</div>
+          <ul style={{ margin: 0, paddingLeft: 18, color: "#cbd5e1", lineHeight: 1.7 }}>
+            <li>日本語は「意味のトリガー」。直訳はしません。</li>
+            <li>英語は「自然な一言」。状況と感情で覚えるのがコツ。</li>
+            <li>項目はこの画面から増やせます（<code>INITIAL_ITEMS</code> に追加）。</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  );
+}
