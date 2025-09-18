@@ -1,421 +1,357 @@
-import React, { useEffect, useMemo, useState } from "react";
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>意味トリガー式アコーディオン（JP→EN）— Deck対応/保存つき</title>
+  <style>
+    :root{--bg:#0f172a;--card:#111827;--ink:#e5e7eb;--muted:#9ca3af;--accent:#22d3ee;--ring:#334155}
+    *{box-sizing:border-box}
+    body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.6 system-ui,-apple-system,Segoe UI,Roboto,"Noto Sans JP",sans-serif;padding:16px}
+    .wrap{max-width:980px;margin:0 auto;display:grid;gap:12px}
+    .card{background:var(--card);border:1px solid var(--ring);border-radius:12px;padding:12px}
+    .lead{color:var(--muted);font-size:.95rem}
+    .controls{display:flex;gap:8px;flex-wrap:wrap}
+    button{appearance:none;border:1px solid var(--ring);color:var(--ink);background:transparent;padding:8px 10px;border-radius:10px;font-weight:600;cursor:pointer}
+    button.primary{background:#0e7490;border-color:#0e7490}
+    button.ghost{border-color:transparent;background:#0b1220}
+    button:active{transform:translateY(1px)}
+    select,input,textarea{background:#0b1220;color:var(--ink);border:1px solid var(--ring);border-radius:10px;padding:8px}
+    label{font-size:.9rem;color:#cbd5e1}
+    .bar{height:8px;background:#1f2937;border-radius:8px;overflow:hidden}
+    .fill{height:100%;background:var(--accent);width:0%}
+    .list{display:grid;gap:10px;margin-top:10px}
+    .item{border:1px solid #1f2937;border-radius:12px;padding:8px}
+    .row{display:flex;align-items:center;gap:8px}
+    .tag{font-size:11px;font-weight:800;color:#22d3ee;background:#082f36;border:1px solid #0e4a53;padding:2px 6px;border-radius:999px;white-space:nowrap}
+    .jp{font-weight:700}
+    .spacer{flex:1}
+    .panel{margin-left:10px;padding-left:10px;border-left:3px solid var(--accent);margin-top:6px}
+    .hint{color:var(--muted);font-size:.85rem;margin-top:4px}
+    .tests{display:grid;gap:6px;margin-top:10px}
+    .ok{background:#0b3a2b;border:1px solid #1e7f5b}
+    .ng{background:#3a0b0b;border:1px solid #7f1d1d}
+    .testrow{padding:6px 8px;border-radius:8px}
+    .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+    .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
+    @media (max-width: 760px){.grid2,.grid3{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <!-- ヘッダー/操作 -->
+    <section class="card">
+      <h1 style="margin:0">意味トリガー式アコーディオン（JP→EN）</h1>
+      <p class="lead">日本語は直訳しない<strong style="color:#e5e7eb">ラベル</strong>（常に表示） → <strong style="color:#e5e7eb">アコーディオンで英語</strong>（開くまで見えない）。</p>
 
-/**
- * React版：意味トリガー式アコーディオン（JP→EN） — Deck対応/保存つき
- * --------------------------------------------------------------------------------
- * 🔧 バグ修正：
- * - キャンバスは code/react (TSX) 実行環境です。以前は HTML 全文（<!doctype html> ...）を
- *   直接入れていたため、TSX パーサが先頭でコケて `Unexpected token (1:0)` が発生しました。
- * - これを純 React コンポーネントへ全面移行し、HTML は一切含めません。
- *
- * 🎯 仕様（ユーザー要望反映）
- * - JP（意味ラベル）は常に表示
- * - EN（自然表現）はアコーディオンで開くまで見えない（直訳防止）
- * - デッキ切替／作成／削除、カード追加、ローカル保存(localStorage)、JSON入出力
- * - 進捗バー、全開・全閉（EN表示のみ）、シャッフル
- * - 内蔵テスト：shuffle / percent / idsOf（既存）＋ 追加テスト（ID一意性など）
- */
+      <div class="grid3" style="margin-top:8px">
+        <!-- デッキ選択 -->
+        <div>
+          <label>デッキ選択</label>
+          <div class="controls" style="margin-top:6px">
+            <select id="deckSelect"></select>
+            <input id="newDeckName" placeholder="新しいデッキ名" />
+            <button class="primary" id="createDeckBtn">作成</button>
+            <button id="deleteDeckBtn">選択デッキ削除</button>
+          </div>
+        </div>
 
-// ----------------------------- データ -----------------------------
-const DEFAULT_DECKS = {
-  Core: [
-    { id: "intro-01",   tag: "自己紹介", jp: "こんにちは、私は〜です",           en: "Hi, I’m [Your Name].",                                                   hint: "直訳NG。名乗りは最短でOK。" },
-    { id: "hobby-01",   tag: "趣味",     jp: "音楽が好き／作曲が好き",         en: "I like making music. / I love composing.",                               hint: "make music＝音楽活動全般。like/loveで自然に。" },
-    { id: "progress-01",tag: "近況",     jp: "ここ数ヶ月で12曲つくった",       en: "I wrote 12 songs in the past few months.",                               hint: "in the past few months＝直近の数ヶ月。" },
-    { id: "feeling-01", tag: "気持ち",   jp: "作れたのは嬉しい／もっと作りたい", en: "I’m happy about it, but I want to make more.",                           hint: "be happy about it で十分自然。" },
-    { id: "reunion-01", tag: "再会",     jp: "また話せて嬉しい",                 en: "I’m really glad we can talk again.",                                   hint: "glad we can talk again＝再開の喜び。" },
-    { id: "nervous-01", tag: "状況",     jp: "久しぶりで少し緊張している",       en: "I’m a bit nervous because it’s been a while.",                          hint: "I’m a bit + adj でやわらかく。" },
-    { id: "reason-01",  tag: "理由",     jp: "自分のプロジェクトに時間が必要だった", en: "I stopped our weekly calls because I needed time for my own projects.", hint: "because I needed time で十分通じる。" },
-    { id: "future-01",  tag: "今後",     jp: "音楽も英語も少しずつ続けたい",     en: "I want to keep making music and keep practicing English little by little.", hint: "keep ~ing / little by little は相性◎。" },
-    { id: "quote-01",   tag: "名台詞",   jp: "（おまけ）マトリックスの一言",     en: "I know kung fu.",                                                     hint: "発音リズム：I / know / KUNG fu." },
-  ],
-  "2025-09-17 Call": [
-    { id: "mingus-01", tag: "音楽話", jp: "フリーがミンガス好きと言ってた→そこで知った", en: "I knew about Charles Mingus because Flea from Red Hot Chili Peppers said he loves him.", hint: "Flea from RHCP で通じる。" },
-    { id: "mingus-02", tag: "音楽話", jp: "フリーの話を聞いてミンガスにハマった", en: "I got into Mingus after hearing Flea talk about him." },
-    { id: "mingus-03", tag: "音楽話(短)", jp: "フリーがミンガス好き→それで知った", en: "Flea loves Charles Mingus—that’s how I knew him." },
-    { id: "dbass-01", tag: "練習トラブル", jp: "DB練習中に『うるせぇ』と怒鳴られた", en: "While I was practicing double bass, someone shouted, ‘Damn, too loud!’" },
-    { id: "dbass-02", tag: "練習トラブル", jp: "めげずに、次は広い公園で練習するつもり", en: "I won’t give up—I’ll practice in a bigger park next time." },
-    { id: "dbass-03", tag: "練習→対策", jp: "怒鳴られたので、広い公園に移動して続ける", en: "Someone yelled at me for being noisy when I practiced my double bass, so I’ll move to a bigger park." },
-    { id: "heat-01", tag: "天気", jp: "日本はまだ本当に暑い", en: "It’s still really hot in Japan." },
-    { id: "heat-02", tag: "天気", jp: "最近も日本はずっと暑い", en: "Japan is still very hot these days." },
-    { id: "heat-03", tag: "天気(別言い方)", jp: "日本の暑さはまだおさまっていない", en: "The heat hasn’t let up in Japan yet." },
-  ],
-};
-
-const LS_KEY = "jpEnDecks_v1";
-const LS_DECKNAME = "jpEnCurrentDeck";
-
-// ----------------------------- ユーティリティ -----------------------------
-const shuffleArray = (arr) => {
-  const a = [...arr];
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [a[i], a[j]] = [a[j], a[i]];
-  }
-  return a;
-};
-const percent = (opened, total) => (total ? Math.round((opened / total) * 100) : 0);
-const idsOf = (items) => items.map((i) => i.id);
-
-// ----------------------------- スタイル -----------------------------
-const styles = {
-  app: {
-    minHeight: "100vh",
-    background: "#0f172a",
-    color: "#e5e7eb",
-    fontFamily:
-      "system-ui, -apple-system, Segoe UI, Roboto, 'Noto Sans JP', 'Hiragino Kaku Gothic ProN', Meiryo, sans-serif",
-    padding: 16,
-  },
-  container: { maxWidth: 980, margin: "0 auto", display: "grid", gap: 12 },
-  card: { background: "#111827", border: "1px solid #334155", borderRadius: 12, padding: 12 },
-  lead: { color: "#9ca3af", fontSize: 14 },
-  controlsRow: { display: "flex", gap: 8, flexWrap: "wrap" },
-  btn: {
-    appearance: "none",
-    border: "1px solid #334155",
-    background: "transparent",
-    color: "#e5e7eb",
-    borderRadius: 10,
-    padding: "8px 10px",
-    fontWeight: 700,
-    cursor: "pointer",
-  },
-  btnPrimary: { background: "#0e7490", borderColor: "#0e7490" },
-  bar: { height: 8, background: "#1f2937", borderRadius: 8, overflow: "hidden" },
-  fill: (w) => ({ height: "100%", background: "#22d3ee", width: `${w}%` }),
-  list: { display: "grid", gap: 10, marginTop: 10 },
-  item: { border: "1px solid #1f2937", borderRadius: 12, padding: 8 },
-  row: { display: "flex", alignItems: "center", gap: 8 },
-  tag: {
-    fontSize: 11,
-    fontWeight: 800,
-    color: "#22d3ee",
-    background: "#082f36",
-    border: "1px solid #0e4a53",
-    padding: "2px 6px",
-    borderRadius: 999,
-    whiteSpace: "nowrap",
-  },
-  jp: { fontWeight: 700 },
-  spacer: { flex: 1 },
-  panel: { marginLeft: 10, paddingLeft: 10, borderLeft: "3px solid #22d3ee", marginTop: 6 },
-  hint: { color: "#9ca3af", fontSize: 13, marginTop: 4 },
-  grid2: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 },
-  grid3: { display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 },
-};
-
-// ----------------------------- コンポーネント -----------------------------
-export default function JPtoENDecks() {
-  // decks
-  const [decks, setDecks] = useState(() => {
-    try {
-      const raw = localStorage.getItem(LS_KEY);
-      if (raw) return JSON.parse(raw);
-    } catch {}
-    return DEFAULT_DECKS;
-  });
-  const deckNames = Object.keys(decks);
-  const [current, setCurrent] = useState(() => {
-    try {
-      return localStorage.getItem(LS_DECKNAME) || deckNames[0] || "Core";
-    } catch {
-      return deckNames[0] || "Core";
-    }
-  });
-
-  // open EN ids (Set)
-  const [openIds, setOpenIds] = useState(() => new Set());
-
-  // tests
-  const [tests, setTests] = useState([]);
-
-  // persist
-  useEffect(() => {
-    try { localStorage.setItem(LS_KEY, JSON.stringify(decks)); } catch {}
-  }, [decks]);
-  useEffect(() => {
-    try { localStorage.setItem(LS_DECKNAME, current); } catch {}
-  }, [current]);
-
-  const items = decks[current] || [];
-  const total = items.length;
-  const opened = openIds.size;
-  const pct = useMemo(() => percent(opened, total), [opened, total]);
-
-  // actions
-  const toggle = (id) => setOpenIds((prev) => {
-    const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n;
-  });
-  const openAll = () => setOpenIds(new Set(items.map((i) => i.id)));
-  const closeAll = () => setOpenIds(new Set());
-  const shuffleAll = () => setDecks((prev) => ({ ...prev, [current]: shuffleArray(prev[current] || []) }));
-
-  // add card
-  const [fTag, setFTag] = useState("");
-  const [fJP, setFJP] = useState("");
-  const [fEN, setFEN] = useState("");
-  const [fHint, setFHint] = useState("");
-
-  const addCard = () => {
-    if (!fJP || !fEN) { alert("JP と EN は必須です"); return; }
-    const newId = `${current.replace(/\s+/g, "-").toLowerCase()}-${Date.now()}-${Math.floor(Math.random()*1000)}`;
-    const newItem = { id: newId, tag: fTag || "フレーズ", jp: fJP, en: fEN, hint: fHint || undefined };
-    setDecks((prev) => ({ ...prev, [current]: [...(prev[current] || []), newItem] }));
-    setFTag(""); setFJP(""); setFEN(""); setFHint("");
-  };
-
-  // deck create/delete
-  const [newDeckName, setNewDeckName] = useState("");
-  const createDeck = () => {
-    const name = newDeckName.trim();
-    if (!name) return alert("デッキ名を入力してください");
-    if (decks[name]) return alert("そのデッキ名は既にあります");
-    setDecks((prev) => ({ ...prev, [name]: [] }));
-    setNewDeckName("");
-    setCurrent(name);
-    setOpenIds(new Set());
-  };
-  const deleteDeck = () => {
-    if (Object.keys(decks).length <= 1) return alert("このデッキは削除できません（最低1つ必要）");
-    if (!confirm(`デッキ「${current}」を削除しますか？（元に戻せません）`)) return;
-    setDecks((prev) => {
-      const { [current]: _omit, ...rest } = prev; return rest;
-    });
-    const names = deckNames.filter((n) => n !== current);
-    const next = names[0] || "Core";
-    setCurrent(next);
-    setOpenIds(new Set());
-  };
-
-  // export/import
-  const exportJSON = () => {
-    const blob = new Blob([JSON.stringify(decks, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a"); a.href = url; a.download = "jp-en-decks.json"; a.click();
-    URL.revokeObjectURL(url);
-  };
-  const onImportFile = (file) => {
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      try {
-        const data = JSON.parse(String(reader.result));
-        if (typeof data !== "object" || Array.isArray(data)) throw new Error("format");
-        if (!confirm("現在のデッキを上書きします。よろしいですか？")) return;
-        setDecks(data);
-        const first = Object.keys(data)[0] || "Core";
-        setCurrent(first);
-        setOpenIds(new Set());
-      } catch {
-        alert("JSONの形式が正しくありません");
-      }
-    };
-    reader.readAsText(file);
-  };
-
-  // ----------------------------- 内蔵テスト -----------------------------
-  const runTests = () => {
-    const results = [];
-    const assert = (name, cond, info = "") => results.push({ name, passed: !!cond, info });
-
-    // 1) shuffle: 要素保持 & 概ね順序が変わる
-    {
-      const src = [1, 2, 3, 4, 5, 6];
-      const s1 = shuffleArray(src);
-      const same = src.slice().sort().join(",") === s1.slice().sort().join(",");
-      assert("shuffle preserves elements", same);
-      const tries = [shuffleArray(src).join(","), shuffleArray(src).join(","), shuffleArray(src).join(",")];
-      const anyChanged = tries.some((j) => j !== src.join(","));
-      assert("shuffle usually changes order (probabilistic)", anyChanged, tries.join(" | "));
-    }
-    // 2) percent: 境界
-    {
-      assert("percent 0/0 = 0", percent(0, 0) === 0);
-      assert("percent 3/10 = 30", percent(3, 10) === 30);
-      assert("percent 10/10 = 100", percent(10, 10) === 100);
-    }
-    // 3) idsOf: 長さと一意性（現在デッキ）
-    {
-      const ids = idsOf(items);
-      assert("idsOf length matches (current deck)", ids.length === items.length);
-      assert("idsOf unique (current deck)", new Set(ids).size === ids.length);
-    }
-    // 4) 新IDの衝突しにくさ（簡易）
-    {
-      const a = `${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-      const b = `${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-      assert("new id likely unique", a !== b, `${a} vs ${b}`);
-    }
-    // 5) toggle 模擬：Set の増減
-    {
-      const mock = new Set();
-      const id = "x";
-      mock.has(id) ? mock.delete(id) : mock.add(id);
-      const afterAdd = mock.size === 1 && mock.has(id);
-      mock.has(id) ? mock.delete(id) : mock.add(id);
-      const afterRemove = mock.size === 0 && !mock.has(id);
-      assert("toggle adds then removes", afterAdd && afterRemove);
-    }
-
-    setTests(results);
-  };
-
-  useEffect(() => { runTests(); /* on mount & when deck changes in length */ }, [current, items.length]);
-
-  // ----------------------------- Render -----------------------------
-  return (
-    <div style={styles.app}>
-      <div style={styles.container}>
-        {/* ヘッダー/操作 */}
-        <section style={styles.card}>
-          <h1 style={{ margin: 0 }}>意味トリガー式アコーディオン（JP→EN）</h1>
-          <p style={styles.lead}>
-            日本語は直訳しない<strong style={{ color: "#e5e7eb" }}>ラベル</strong>（常に表示）→
-            <strong style={{ color: "#e5e7eb" }}>アコーディオンで英語</strong>（開くまで見えない）。
-          </p>
-
-          <div style={{ ...styles.grid3, marginTop: 8 }}>
-            {/* デッキ選択 */}
-            <div>
-              <label>デッキ選択</label>
-              <div style={{ ...styles.controlsRow, marginTop: 6 }}>
-                <select value={current} onChange={(e) => { setCurrent(e.target.value); setOpenIds(new Set()); }}>
-                  {deckNames.map((n) => (
-                    <option key={n} value={n}>{n}</option>
-                  ))}
-                </select>
-                <input placeholder="新しいデッキ名" value={newDeckName} onChange={(e) => setNewDeckName(e.target.value)} />
-                <button style={{ ...styles.btn, ...styles.btnPrimary }} onClick={createDeck}>作成</button>
-                {deckNames.length > 1 && (
-                  <button style={styles.btn} onClick={deleteDeck}>選択デッキ削除</button>
-                )}
-              </div>
-            </div>
-
-            {/* 全体操作 */}
-            <div>
-              <label>全体操作</label>
-              <div style={{ ...styles.controlsRow, marginTop: 6 }}>
-                <button style={styles.btn} onClick={openAll}>全部ひらく（英語）</button>
-                <button style={styles.btn} onClick={closeAll}>全部とじる（英語）</button>
-                <button style={{ ...styles.btn, ...styles.btnPrimary }} onClick={shuffleAll}>順番シャッフル</button>
-              </div>
-              <div style={{ display: "flex", gap: 10, alignItems: "center", marginTop: 10 }}>
-                <div style={{ flex: 1 }}>
-                  <div style={styles.bar}><div style={styles.fill(pct)} /></div>
-                  <div style={{ ...styles.lead, fontSize: 13, marginTop: 6 }}>開いた項目：{opened} / {total}（{pct}%）</div>
-                </div>
-              </div>
-            </div>
-
-            {/* 保存/読み込み */}
-            <div>
-              <label>保存／読み込み</label>
-              <div style={{ ...styles.controlsRow, marginTop: 6 }}>
-                <button style={styles.btn} onClick={exportJSON}>エクスポート（JSON）</button>
-                <label style={{ display: "inline-flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
-                  <input type="file" accept="application/json" onChange={(e) => onImportFile(e.target.files?.[0] || null)} />
-                  インポート
-                </label>
-              </div>
+        <!-- 全体操作 -->
+        <div>
+          <label>全体操作</label>
+          <div class="controls" style="margin-top:6px">
+            <button id="openAllBtn">全部ひらく（英語）</button>
+            <button id="closeAllBtn">全部とじる（英語）</button>
+            <button class="primary" id="shuffleBtn">順番シャッフル</button>
+          </div>
+          <div style="display:flex;gap:10px;align-items:center;margin-top:10px">
+            <div style="flex:1">
+              <div class="bar"><div class="fill" id="fill" style="width:0%"></div></div>
+              <div class="lead" id="meter" style="font-size:13px;margin-top:6px">開いた項目：0/0（0%）</div>
             </div>
           </div>
-        </section>
+        </div>
 
-        {/* 本体：JPは常に可視、ENだけアコーディオンで開く */}
-        <section style={styles.card}>
-          <div style={styles.list}>
-            {items.map((it) => {
-              const isOpen = openIds.has(it.id);
-              return (
-                <div key={it.id} style={styles.item}>
-                  <div style={styles.row}>
-                    <span style={styles.tag}>{it.tag}</span>
-                    <span style={styles.jp}>{it.jp}</span>
-                    <div style={styles.spacer} />
-                    <button
-                      aria-expanded={isOpen}
-                      style={{ ...styles.btn, borderColor: "transparent", background: "#0b1220" }}
-                      onClick={() => toggle(it.id)}
-                    >
-                      {isOpen ? "英語を隠す" : "英語を見る"}
-                    </button>
-                  </div>
-                  {isOpen && (
-                    <div style={styles.panel}>
-                      <div>{it.en}</div>
-                      {it.hint && <div style={styles.hint}>{it.hint}</div>}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
+        <!-- 保存/読み込み -->
+        <div>
+          <label>保存／読み込み</label>
+          <div class="controls" style="margin-top:6px">
+            <button id="exportBtn">エクスポート（JSON）</button>
+            <label style="display:inline-flex;align-items:center;gap:8px;cursor:pointer">
+              <input type="file" id="importFile" accept="application/json" /> インポート
+            </label>
           </div>
-        </section>
-
-        {/* 追加フォーム */}
-        <section style={styles.card}>
-          <h2 style={{ margin: "0 0 6px", fontSize: 18 }}>カードを追加（{current}）</h2>
-          <div style={styles.grid2}>
-            <div>
-              <label>タグ</label>
-              <input placeholder="例：近況／音楽話 など" value={fTag} onChange={(e) => setFTag(e.target.value)} />
-            </div>
-            <div>
-              <label>JP（意味ラベル）*</label>
-              <input placeholder="例：日本はまだ本当に暑い" value={fJP} onChange={(e) => setFJP(e.target.value)} />
-            </div>
-            <div>
-              <label>EN（自然表現）*</label>
-              <textarea rows={2} placeholder="例：It’s still really hot in Japan." value={fEN} onChange={(e) => setFEN(e.target.value)} />
-            </div>
-            <div>
-              <label>ヒント</label>
-              <input placeholder="任意：言い換えや注意点など" value={fHint} onChange={(e) => setFHint(e.target.value)} />
-            </div>
-          </div>
-          <div style={{ ...styles.controlsRow, marginTop: 8 }}>
-            <button style={{ ...styles.btn, ...styles.btnPrimary }} onClick={addCard}>このデッキに追加</button>
-          </div>
-        </section>
-
-        {/* テスト結果 */}
-        <section style={styles.card}>
-          <h2 style={{ margin: "0 0 6px", fontSize: 18 }}>内蔵テスト（簡易）</h2>
-          <div style={{ ...styles.lead, fontSize: 13 }}>純関数（shuffle / percent / idsOf）の動作チェック。</div>
-          <div style={{ display: "grid", gap: 6, marginTop: 10 }}>
-            {tests.map((t, i) => (
-              <div
-                key={i}
-                style={{
-                  padding: "6px 8px",
-                  borderRadius: 8,
-                  background: t.passed ? "#0b3a2b" : "#3a0b0b",
-                  border: `1px solid ${t.passed ? "#1e7f5b" : "#7f1d1d"}`,
-                }}
-              >
-                <div style={{ fontWeight: 700 }}>{t.passed ? "✅ PASS" : "❌ FAIL"} — {t.name}</div>
-                {t.info ? <div style={{ fontSize: 12, opacity: 0.8, marginTop: 2 }}>{t.info}</div> : null}
-              </div>
-            ))}
-          </div>
-          <div style={{ marginTop: 10 }}>
-            <button style={styles.btn} onClick={runTests}>テストをもう一度実行</button>
-          </div>
-        </section>
-
-        {/* 使い方メモ */}
-        <section style={styles.card}>
-          <h2 style={{ margin: "0 0 6px", fontSize: 18 }}>使い方メモ</h2>
-          <ul style={{ margin: 0, paddingLeft: 18, lineHeight: 1.7, color: "#cbd5e1" }}>
-            <li>JPは常に表示。ENはアコーディオンで開くまで見えません（直訳癖を防止）。</li>
-            <li>デッキで「前の問題」「今日の問題」を分けて保存（ローカル保存）。</li>
-            <li>JSONでエクスポートしてGitHubに置くとバックアップが簡単。</li>
-            <li>Googleサイトには GitHub Pages の公開URLを「埋め込み→URL」で貼ってください。</li>
-          </ul>
-        </section>
+        </div>
       </div>
-    </div>
-  );
-}
+    </section>
+
+    <!-- 本体：JPは常に可視、ENだけアコーディオンで開く -->
+    <section class="card">
+      <div id="list" class="list"></div>
+    </section>
+
+    <!-- 追加フォーム -->
+    <section class="card">
+      <h2 style="margin:0 0 6px;font-size:18px">カードを追加（<span id="deckNameLabel"></span>）</h2>
+      <div class="grid2">
+        <div>
+          <label>タグ</label>
+          <input id="fTag" placeholder="例：近況／音楽話 など" />
+        </div>
+        <div>
+          <label>JP（意味ラベル）*</label>
+          <input id="fJP" placeholder="例：日本はまだ本当に暑い" />
+        </div>
+        <div>
+          <label>EN（自然表現）*</label>
+          <textarea id="fEN" rows="2" placeholder="例：It’s still really hot in Japan."></textarea>
+        </div>
+        <div>
+          <label>ヒント</label>
+          <input id="fHint" placeholder="任意：言い換えや注意点など" />
+        </div>
+      </div>
+      <div class="controls" style="margin-top:8px">
+        <button class="primary" id="addCardBtn">このデッキに追加</button>
+      </div>
+    </section>
+
+    <!-- テスト -->
+    <section class="card">
+      <h2 style="margin:0 0 6px;font-size:18px">内蔵テスト（簡易）</h2>
+      <div class="lead" style="font-size:13px">純関数（shuffle / percent / idsOf）の動作チェック。</div>
+      <div class="tests" id="tests"></div>
+      <div style="margin-top:10px">
+        <button id="rerunTestsBtn">テストをもう一度実行</button>
+      </div>
+    </section>
+
+    <!-- 使い方メモ -->
+    <section class="card">
+      <h2 style="margin:0 0 6px;font-size:18px">使い方メモ</h2>
+      <ul style="margin:0;padding-left:18px;line-height:1.7;color:#cbd5e1">
+        <li>JPは常に表示。ENはアコーディオンで開くまで見えません（直訳癖を防止）。</li>
+        <li>デッキで「前の問題」「今日の問題」を分けて保存（ローカル保存）。</li>
+        <li>JSONでエクスポートしてGitHubに置けばバックアップが簡単。</li>
+        <li>Googleサイトには GitHub Pages の公開URLを「埋め込み→URL」で貼ってください。</li>
+      </ul>
+    </section>
+  </div>
+
+  <!-- ここから純バニラJS。JSX/TSX/Babel/Reactは不要 -->
+  <script>
+    // -------------------- 初期データ（デッキ） --------------------
+    const DEFAULT_DECKS = {
+      "Core": [
+        { id: "intro-01",   tag: "自己紹介", jp: "こんにちは、私は〜です",           en: "Hi, I’m [Your Name].",                                                   hint: "直訳NG。名乗りは最短でOK。" },
+        { id: "hobby-01",   tag: "趣味",     jp: "音楽が好き／作曲が好き",         en: "I like making music. / I love composing.",                               hint: "make music＝音楽活動全般。like/loveで自然に。" },
+        { id: "progress-01",tag: "近況",     jp: "ここ数ヶ月で12曲つくった",       en: "I wrote 12 songs in the past few months.",                               hint: "in the past few months＝直近の数ヶ月。" },
+        { id: "feeling-01", tag: "気持ち",   jp: "作れたのは嬉しい／もっと作りたい", en: "I’m happy about it, but I want to make more.",                           hint: "be happy about it で十分自然。" },
+        { id: "reunion-01", tag: "再会",     jp: "また話せて嬉しい",                 en: "I’m really glad we can talk again.",                                   hint: "glad we can talk again＝再開の喜び。" },
+        { id: "nervous-01", tag: "状況",     jp: "久しぶりで少し緊張している",       en: "I’m a bit nervous because it’s been a while.",                          hint: "I’m a bit + adj でやわらかく。" },
+        { id: "reason-01",  tag: "理由",     jp: "自分のプロジェクトに時間が必要だった", en: "I stopped our weekly calls because I needed time for my own projects.", hint: "because I needed time で十分通じる。" },
+        { id: "future-01",  tag: "今後",     jp: "音楽も英語も少しずつ続けたい",     en: "I want to keep making music and keep practicing English little by little.", hint: "keep ~ing / little by little は相性◎。" },
+        { id: "quote-01",   tag: "名台詞",   jp: "（おまけ）マトリックスの一言",     en: "I know kung fu.",                                                     hint: "発音リズム：I / know / KUNG fu." }
+      ],
+      "2025-09-17 Call": [
+        { id: "mingus-01", tag: "音楽話", jp: "フリーがミンガス好きと言ってた→そこで知った", en: "I knew about Charles Mingus because Flea from Red Hot Chili Peppers said he loves him.", hint: "Flea from RHCP で通じる。" },
+        { id: "mingus-02", tag: "音楽話", jp: "フリーの話を聞いてミンガスにハマった", en: "I got into Mingus after hearing Flea talk about him." },
+        { id: "mingus-03", tag: "音楽話(短)", jp: "フリーがミンガス好き→それで知った", en: "Flea loves Charles Mingus—that’s how I knew him." },
+        { id: "dbass-01", tag: "練習トラブル", jp: "DB練習中に『うるせぇ』と怒鳴られた", en: "While I was practicing double bass, someone shouted, ‘Damn, too loud!’" },
+        { id: "dbass-02", tag: "練習トラブル", jp: "めげずに、次は広い公園で練習するつもり", en: "I won’t give up—I’ll practice in a bigger park next time." },
+        { id: "dbass-03", tag: "練習→対策", jp: "怒鳴られたので、広い公園に移動して続ける", en: "Someone yelled at me for being noisy when I practiced my double bass, so I’ll move to a bigger park." },
+        { id: "heat-01", tag: "天気", jp: "日本はまだ本当に暑い", en: "It’s still really hot in Japan." },
+        { id: "heat-02", tag: "天気", jp: "最近も日本はずっと暑い", en: "Japan is still very hot these days." },
+        { id: "heat-03", tag: "天気(別言い方)", jp: "日本の暑さはまだおさまっていない", en: "The heat hasn’t let up in Japan yet." }
+      ]
+    };
+
+    const LS_KEY = 'jpEnDecks_v1';
+    const LS_DECKNAME = 'jpEnCurrentDeck';
+
+    // -------------------- 状態 --------------------
+    const state = {
+      decks: loadDecks(),
+      current: localStorage.getItem(LS_DECKNAME) || 'Core',
+      openIds: new Set() // ENを表示中のID
+    };
+
+    // -------------------- 要素参照 --------------------
+    const deckSelect = document.getElementById('deckSelect');
+    const newDeckName = document.getElementById('newDeckName');
+    const createDeckBtn = document.getElementById('createDeckBtn');
+    const deleteDeckBtn = document.getElementById('deleteDeckBtn');
+    const openAllBtn = document.getElementById('openAllBtn');
+    const closeAllBtn = document.getElementById('closeAllBtn');
+    const shuffleBtn = document.getElementById('shuffleBtn');
+    const listEl = document.getElementById('list');
+    const deckNameLabel = document.getElementById('deckNameLabel');
+    const fillEl = document.getElementById('fill');
+    const meterEl = document.getElementById('meter');
+    const exportBtn = document.getElementById('exportBtn');
+    const importFile = document.getElementById('importFile');
+    const fTag = document.getElementById('fTag');
+    const fJP = document.getElementById('fJP');
+    const fEN = document.getElementById('fEN');
+    const fHint = document.getElementById('fHint');
+    const addCardBtn = document.getElementById('addCardBtn');
+    const testsBox = document.getElementById('tests');
+    const rerunTestsBtn = document.getElementById('rerunTestsBtn');
+
+    // -------------------- 初期化 --------------------
+    function loadDecks(){
+      try { const raw = localStorage.getItem(LS_KEY); if (raw) return JSON.parse(raw); } catch(e){}
+      return DEFAULT_DECKS;
+    }
+    function saveDecks(){ try { localStorage.setItem(LS_KEY, JSON.stringify(state.decks)); } catch(e){} }
+    function saveCurrent(){ try { localStorage.setItem(LS_DECKNAME, state.current); } catch(e){} }
+
+    function renderDeckOptions(){
+      deckSelect.innerHTML = '';
+      Object.keys(state.decks).forEach(name => {
+        const opt = document.createElement('option'); opt.value = name; opt.textContent = name;
+        if (name === state.current) opt.selected = true; deckSelect.appendChild(opt);
+      });
+      deckNameLabel.textContent = state.current;
+    }
+
+    function getItems(){ return state.decks[state.current] || []; }
+
+    function renderList(){
+      const items = getItems();
+      listEl.innerHTML = '';
+      items.forEach(it => {
+        const item = document.createElement('div'); item.className = 'item';
+        const row = document.createElement('div'); row.className = 'row';
+        const tag = document.createElement('span'); tag.className = 'tag'; tag.textContent = it.tag;
+        const jp = document.createElement('span'); jp.className = 'jp'; jp.textContent = it.jp; // ← JPは常に可視
+        const spacer = document.createElement('div'); spacer.className = 'spacer';
+        const btn = document.createElement('button');
+        btn.className = 'ghost';
+        const isOpen = state.openIds.has(it.id);
+        btn.textContent = isOpen ? '英語を隠す' : '英語を見る';
+        btn.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+        btn.addEventListener('click', () => {
+          if (state.openIds.has(it.id)) state.openIds.delete(it.id); else state.openIds.add(it.id);
+          renderList();
+        });
+        row.appendChild(tag); row.appendChild(jp); row.appendChild(spacer); row.appendChild(btn);
+        item.appendChild(row);
+
+        if (isOpen) {
+          const panel = document.createElement('div'); panel.className = 'panel';
+          const en = document.createElement('div'); en.textContent = it.en; // ENは開かないと見えない
+          panel.appendChild(en);
+          if (it.hint){ const hint = document.createElement('div'); hint.className = 'hint'; hint.textContent = it.hint; panel.appendChild(hint); }
+          item.appendChild(panel);
+        }
+        listEl.appendChild(item);
+      });
+      updateProgress();
+    }
+
+    function updateProgress(){
+      const total = getItems().length;
+      const opened = state.openIds.size;
+      const pct = total ? Math.round((opened/total)*100) : 0;
+      fillEl.style.width = pct + '%';
+      meterEl.textContent = `開いた項目：${opened}/${total}（${pct}%）`;
+    }
+
+    function shuffleCurrent(){
+      const arr = [...getItems()];
+      for (let i = arr.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [arr[i], arr[j]] = [arr[j], arr[i]];
+      }
+      state.decks[state.current] = arr;
+      saveDecks();
+      renderList();
+    }
+
+    // -------------------- イベント --------------------
+    deckSelect.addEventListener('change', ()=>{
+      state.current = deckSelect.value; state.openIds.clear(); saveCurrent(); renderDeckOptions(); renderList(); runTests();
+    });
+    createDeckBtn.addEventListener('click', ()=>{
+      const name = (newDeckName.value || '').trim();
+      if(!name) return alert('デッキ名を入力してください');
+      if(state.decks[name]) return alert('そのデッキ名は既にあります');
+      state.decks[name] = []; newDeckName.value=''; state.current = name; saveDecks(); saveCurrent(); renderDeckOptions(); renderList();
+    });
+    deleteDeckBtn.addEventListener('click', ()=>{
+      const names = Object.keys(state.decks);
+      if(names.length <= 1) return alert('このデッキは削除できません（最低1つ必要）');
+      if(!confirm(`デッキ「${state.current}」を削除しますか？（元に戻せません）`)) return;
+      delete state.decks[state.current]; const next = Object.keys(state.decks)[0] || 'Core';
+      state.current = next; state.openIds.clear(); saveDecks(); saveCurrent(); renderDeckOptions(); renderList();
+    });
+    openAllBtn.addEventListener('click', ()=>{ state.openIds = new Set(getItems().map(i=>i.id)); renderList(); });
+    closeAllBtn.addEventListener('click', ()=>{ state.openIds.clear(); renderList(); });
+    shuffleBtn.addEventListener('click', shuffleCurrent);
+
+    addCardBtn.addEventListener('click', ()=>{
+      const jp = (fJP.value||'').trim(); const en = (fEN.value||'').trim(); if(!jp || !en) return alert('JP と EN は必須です');
+      const tag = (fTag.value||'フレーズ').trim(); const hint = (fHint.value||'').trim() || undefined;
+      const uid = state.current.replace(/\s+/g,'-').toLowerCase() + '-' + Date.now() + '-' + Math.floor(Math.random()*1000);
+      const item = { id: uid, tag, jp, en, hint };
+      state.decks[state.current] = [...getItems(), item]; fTag.value=''; fJP.value=''; fEN.value=''; fHint.value=''; saveDecks(); renderList();
+    });
+
+    exportBtn.addEventListener('click', ()=>{
+      const blob = new Blob([JSON.stringify(state.decks, null, 2)], {type:'application/json'});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = 'jp-en-decks.json'; a.click();
+      URL.revokeObjectURL(url);
+    });
+    importFile.addEventListener('change', (e)=>{
+      const file = e.target.files && e.target.files[0]; if(!file) return; const reader = new FileReader();
+      reader.onload = ()=>{
+        try{
+          const data = JSON.parse(String(reader.result));
+          if(typeof data !== 'object' || Array.isArray(data)) throw new Error('format');
+          if(!confirm('現在のデッキを上書きします。よろしいですか？')) return;
+          state.decks = data;
+          state.current = Object.keys(data)[0] || 'Core';
+          state.openIds.clear();
+          saveDecks(); saveCurrent();
+          renderDeckOptions(); renderList();
+        }catch{
+          alert('JSONの形式が正しくありません');
+        }
+      };
+      reader.readAsText(file);
+    });
+
+    // -------------------- テスト（既存+追加、UIに表示） --------------------
+    function idsOf(items){ return items.map(i => i.id); }
+    function runTests(){
+      const out = []; const assert = (name, cond, info="") => out.push({name, pass: !!cond, info});
+      // 1) shuffle: 要素保存 + 多くの場合順序が変わる
+      const src = [1,2,3,4,5,6];
+      const s1 = (arr)=>{ const a=[...arr]; for(let i=a.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [a[i],a[j]]=[a[j],a[i]] } return a; };
+      const s = s1(src); const same = src.slice().sort().join(',') === s.slice().sort().join(','); assert('shuffle preserves elements', same);
+      const tries = [s1(src).join(','), s1(src).join(','), s1(src).join(',')]; const anyChanged = tries.some(j => j !== src.join(',')); assert('shuffle usually changes order (probabilistic)', anyChanged, tries.join(' | '));
+      // 2) percent: 0/0, 3/10, 10/10
+      const pct = (o,t)=> t? Math.round((o/t)*100) : 0; assert('percent 0/0 = 0', pct(0,0) === 0); assert('percent 3/10 = 30', pct(3,10) === 30); assert('percent 10/10 = 100', pct(10,10) === 100);
+      // 3) idsOf: 現在デッキ
+      const items = getItems(); const ids = idsOf(items); assert('idsOf length matches (current deck)', ids.length === items.length); assert('idsOf unique (current deck)', new Set(ids).size === ids.length);
+      // 4) 新IDの衝突確率が低い（簡易）
+      const a = Date.now() + '-' + Math.floor(Math.random()*1000); const b = Date.now() + '-' + Math.floor(Math.random()*1000); assert('new id likely unique', a !== b, a + ' vs ' + b);
+
+      testsBox.innerHTML = ''; out.forEach(r => {
+        const d = document.createElement('div'); d.className = 'testrow ' + (r.pass ? 'ok':'ng');
+        d.innerHTML = `<div style="font-weight:700">${r.pass ? '✅ PASS':'❌ FAIL'} — ${r.name}</div>` + (r.info ? `<div style="font-size:12px;opacity:.8;margin-top:2px">${r.info}</div>` : '');
+        testsBox.appendChild(d);
+      });
+    }
+    rerunTestsBtn.addEventListener('click', runTests);
+
+    // -------------------- 初回描画 --------------------
+    renderDeckOptions();
+    renderList();
+    runTests();
+  </script>
+</body>
+</html>
